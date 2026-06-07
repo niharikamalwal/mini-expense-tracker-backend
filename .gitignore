@@ -1,0 +1,37 @@
+# Dependencies
+node_modules/
+
+# Database files
+*.db
+*.db-journal
+expense_tracker.db
+
+# Environment variables
+.env
+.env.local
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+
+# Package lock (optional - some teams commit this)
+package-lock.json
+
+# Build and temp files
+dist/
+build/
+tmp/
+temp/
+
+# Data files (optional - commit empty folder structure)
+data/*.json
+!data/.gitkeep
