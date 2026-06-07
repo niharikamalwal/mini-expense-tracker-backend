@@ -4,6 +4,7 @@ import sqlite3 from 'sqlite3';
 import { open } from 'sqlite';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import fs from 'fs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -12,15 +13,29 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 
 // Middleware
-app.use(cors());
+app.use(cors({
+  origin: process.env.FRONTEND_URL || '*', // Add your frontend URL in production
+  credentials: true
+}));
 app.use(express.json());
 
-// Database setup
+// Database setup - Use /tmp for Railway/Render (ephemeral storage)
 let db;
+const dbPath = process.env.NODE_ENV === 'production' 
+  ? path.join('/tmp', 'expense_tracker.db')
+  : path.join(__dirname, 'expense_tracker.db');
 
 async function initializeDatabase() {
+  // Ensure directory exists for production
+  if (process.env.NODE_ENV === 'production') {
+    const dbDir = path.dirname(dbPath);
+    if (!fs.existsSync(dbDir)) {
+      fs.mkdirSync(dbDir, { recursive: true });
+    }
+  }
+  
   db = await open({
-    filename: path.join(__dirname, 'expense_tracker.db'),
+    filename: dbPath,
     driver: sqlite3.Database
   });
 
@@ -37,14 +52,23 @@ async function initializeDatabase() {
   `);
 
   console.log('✅ Database initialized successfully');
+  console.log(`📁 Database path: ${dbPath}`);
 }
 
-// Get all expenses
+// Health check endpoint
+app.get('/api/health', (req, res) => {
+  res.json({ 
+    status: 'healthy', 
+    timestamp: new Date().toISOString(),
+    database: db ? 'connected' : 'disconnected'
+  });
+});
+
+// GET all expenses
 app.get('/api/expenses', async (req, res) => {
   try {
-    const expenses = await db.all(
-      'SELECT * FROM expenses ORDER BY date DESC, created_at DESC'
-    );
+    const expenses = await db.all('SELECT * FROM expenses ORDER BY date DESC, created_at DESC');
+    console.log(`📊 Returning ${expenses.length} expenses`);
     res.json(expenses);
   } catch (error) {
     console.error('Error:', error);
@@ -52,14 +76,13 @@ app.get('/api/expenses', async (req, res) => {
   }
 });
 
-// Create new expense - FIXED DATE VALIDATION
+// POST new expense
 app.post('/api/expenses', async (req, res) => {
   try {
     const { amount, category, date, note } = req.body;
     
-    console.log('Creating expense:', { amount, category, date, note });
+    console.log('📝 Creating expense:', { amount, category, date, note });
     
-    // Validation
     if (!amount || amount <= 0) {
       return res.status(400).json({ error: 'Amount must be a positive number' });
     }
@@ -70,27 +93,12 @@ app.post('/api/expenses', async (req, res) => {
       return res.status(400).json({ error: 'Date is required' });
     }
     
-    // FIX: Allow today's date and past dates only
-    const expenseDate = new Date(date);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    expenseDate.setHours(0, 0, 0, 0);
-    
-    // Only block if date is strictly in the future
-    if (expenseDate > today) {
-      return res.status(400).json({ error: 'Date cannot be in the future' });
-    }
-    
     const result = await db.run(
       'INSERT INTO expenses (amount, category, date, note) VALUES (?, ?, ?, ?)',
       [parseFloat(amount), category, date, note || '']
     );
     
-    const newExpense = await db.get(
-      'SELECT * FROM expenses WHERE id = ?',
-      [result.lastID]
-    );
-    
+    const newExpense = await db.get('SELECT * FROM expenses WHERE id = ?', [result.lastID]);
     console.log('✅ Expense created:', newExpense);
     res.status(201).json(newExpense);
   } catch (error) {
@@ -99,21 +107,14 @@ app.post('/api/expenses', async (req, res) => {
   }
 });
 
-// Update expense
+// PUT update expense
 app.put('/api/expenses/:id', async (req, res) => {
   try {
     const { amount, category, date, note } = req.body;
     const id = req.params.id;
     
-    const existing = await db.get('SELECT * FROM expenses WHERE id = ?', [id]);
-    if (!existing) {
-      return res.status(404).json({ error: 'Expense not found' });
-    }
-    
     await db.run(
-      `UPDATE expenses 
-       SET amount = ?, category = ?, date = ?, note = ? 
-       WHERE id = ?`,
+      'UPDATE expenses SET amount = ?, category = ?, date = ?, note = ? WHERE id = ?',
       [parseFloat(amount), category, date, note || '', id]
     );
     
@@ -124,7 +125,7 @@ app.put('/api/expenses/:id', async (req, res) => {
   }
 });
 
-// Delete expense
+// DELETE expense
 app.delete('/api/expenses/:id', async (req, res) => {
   try {
     const id = req.params.id;
@@ -137,7 +138,7 @@ app.delete('/api/expenses/:id', async (req, res) => {
 
 // Test route
 app.get('/api/test', (req, res) => {
-  res.json({ message: 'Expense Tracker is running!' });
+  res.json({ message: 'Expense Tracker Backend is running!' });
 });
 
 // Start server
@@ -146,7 +147,9 @@ async function startServer() {
   app.listen(PORT, () => {
     console.log(`\n🚀 Expense Tracker Server Running`);
     console.log(`📍 http://localhost:${PORT}`);
-    console.log(`📊 API: http://localhost:${PORT}/api/expenses\n`);
+    console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+    console.log(`📊 API: http://localhost:${PORT}/api/expenses`);
+    console.log(`✅ No authentication required - Single user mode\n`);
   });
 }
 
